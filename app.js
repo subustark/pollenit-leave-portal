@@ -1,5 +1,6 @@
 const $=s=>document.querySelector(s);let me=null, data=null;
 const profile=p=>({...p,name:p.full_name,email:p.work_email,title:p.designation,earnedEntitlement:Number(p.earned_leave_entitlement),carryForward:Number(p.carry_forward)});
+new MutationObserver(()=>{if(me&&data)document.querySelector('.card p').textContent=`${(me.earnedEntitlement+me.carryForward-data.balance).toFixed(1)} days used this year`}).observe($('#elBalance'),{childList:true});
 $('.demoAccounts').innerHTML='<b>Pilot access</b><span>Use your PollenIT work email.</span><span>Use the temporary password sent to you privately.</span>';
 async function api(url,opts={}){const r=await fetch(url,{headers:{'Content-Type':'application/json'},...opts});const d=r.status===204?{}:await r.json();if(!r.ok)throw new Error(d.error||'Something went wrong.');return d}
 const fmt=d=>new Intl.DateTimeFormat('en-IN',{day:'numeric',month:'short',year:'numeric'}).format(new Date(d+'T00:00:00'));
