@@ -1,0 +1,48 @@
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+const root = __dirname;
+const dataDir = path.join(root, 'data');
+const storeFile = path.join(dataDir, 'store.json');
+const types = {'.html':'text/html; charset=utf-8','.css':'text/css; charset=utf-8','.js':'application/javascript; charset=utf-8','.json':'application/json; charset=utf-8'};
+const sessions = new Map();
+const nationalHolidays = ['2026-01-26','2026-08-15','2026-10-02'];
+
+function hash(password, salt = crypto.randomBytes(16).toString('hex')) { return `${salt}:${crypto.scryptSync(password, salt, 64).toString('hex')}`; }
+function verify(password, value) { const [salt, digest] = value.split(':'); return crypto.timingSafeEqual(Buffer.from(digest, 'hex'), Buffer.from(hash(password, salt).split(':')[1], 'hex')); }
+function seed() { return { users: [
+  {id:'EMP-001',name:'Subramani',email:'subramani.e@pollenit.com',designation:'Senior Software Engineer',role:'employee',managerEmail:'himanshu.lodha@pollenit.com',earnedEntitlement:12,carryForward:0,passwordHash:hash('Welcome@2026'),mustChangePassword:true,festivalChoices:[]},
+  {id:'EMP-002',name:'Lalith Choudhary',email:'lalit.choudhary@pollenit.com',designation:'Software Engineer',role:'employee',managerEmail:'himanshu.lodha@pollenit.com',earnedEntitlement:12,carryForward:0,passwordHash:hash('Welcome@2026'),mustChangePassword:true,festivalChoices:[]},
+  {id:'EMP-003',name:'Vishal Lodha',email:'vishal.lodha@pollenit.com',designation:'Intern',role:'employee',managerEmail:'himanshu.lodha@pollenit.com',earnedEntitlement:12,carryForward:0,passwordHash:hash('Welcome@2026'),mustChangePassword:true,festivalChoices:[]},
+  {id:'MGR-001',name:'Himanshu Lodha',email:'himanshu.lodha@pollenit.com',designation:'Reporting Manager',role:'manager',earnedEntitlement:12,carryForward:0,passwordHash:hash('Welcome@2026'),mustChangePassword:true,festivalChoices:[]},
+  {id:'HR-001',name:'Admin',email:'admin@pollenit.com',designation:'HR',role:'hr',earnedEntitlement:12,carryForward:0,passwordHash:hash('Welcome@2026'),mustChangePassword:true,festivalChoices:[]}
+], requests: [], notifications: [] }; }
+function readStore() { if (!fs.existsSync(storeFile)) { fs.mkdirSync(dataDir, {recursive:true}); const s=seed(); fs.writeFileSync(storeFile, JSON.stringify(s,null,2)); return s; } return JSON.parse(fs.readFileSync(storeFile,'utf8')); }
+function writeStore(s) { fs.writeFileSync(storeFile, JSON.stringify(s,null,2)); }
+function body(req) { return new Promise((resolve,reject)=>{let raw='';req.on('data',c=>raw+=c);req.on('end',()=>{try{resolve(raw?JSON.parse(raw):{})}catch(e){reject(e)}});}); }
+function send(res,status,payload) { res.writeHead(status,{'Content-Type':'application/json; charset=utf-8','Cache-Control':'no-store'});res.end(JSON.stringify(payload)); }
+function cookie(req) { return (req.headers.cookie||'').split(';').map(x=>x.trim()).find(x=>x.startsWith('pollen_session='))?.split('=')[1]; }
+function user(req, store) { const session=sessions.get(cookie(req)); return session && store.users.find(u=>u.email===session.email); }
+function publicUser(u) { const {passwordHash,...safe}=u; return safe; }
+function notify(store,email,message) { store.notifications.unshift({id:crypto.randomUUID(),email,message,createdAt:new Date().toISOString(),read:false}); }
+function workingDays(start,end,festival=[]){let n=0,d=new Date(`${start}T00:00:00`),e=new Date(`${end}T00:00:00`),excluded=new Set([...nationalHolidays,...festival]);while(d<=e){const iso=d.toISOString().slice(0,10);if(d.getDay()!==0&&d.getDay()!==6&&!excluded.has(iso))n++;d.setDate(d.getDate()+1)}return n;}
+function approvedEarned(store,email){return store.requests.filter(r=>r.employeeEmail===email&&r.status==='approved').reduce((n,r)=>n+r.earnedDays,0)}
+
+http.createServer(async (req,res)=>{
+ try { const url=new URL(req.url,'http://localhost'); let store=readStore();
+  if (url.pathname==='/api/login'&&req.method==='POST') { const d=await body(req),u=store.users.find(x=>x.email===String(d.email).toLowerCase());if(!u||!verify(d.password||'',u.passwordHash))return send(res,401,{error:'Invalid email or password.'});const token=crypto.randomBytes(32).toString('hex');sessions.set(token,{email:u.email});res.writeHead(200,{'Content-Type':'application/json','Set-Cookie':`pollen_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=28800`});return res.end(JSON.stringify({user:publicUser(u)})); }
+  if (url.pathname==='/api/logout'&&req.method==='POST') { sessions.delete(cookie(req));res.writeHead(204,{'Set-Cookie':'pollen_session=; HttpOnly; Path=/; Max-Age=0'});return res.end(); }
+  const me=user(req,store);
+  if (url.pathname==='/api/session') return me?send(res,200,{user:publicUser(me)}):send(res,401,{error:'Not signed in'});
+  if (!me && url.pathname.startsWith('/api/')) return send(res,401,{error:'Please sign in.'});
+  if (url.pathname==='/api/password'&&req.method==='POST') { const d=await body(req);if(!d.password||d.password.length<10)return send(res,400,{error:'Use at least 10 characters.'});me.passwordHash=hash(d.password);me.mustChangePassword=false;writeStore(store);return send(res,200,{user:publicUser(me)}); }
+  if (url.pathname==='/api/dashboard') { const mine=store.requests.filter(r=>r.employeeEmail===me.email);const balance=me.earnedEntitlement+me.carryForward-approvedEarned(store,me.email);const pending=store.requests.filter(r=>r.status==='pending'&&((me.role==='manager'&&r.managerEmail===me.email)||(me.role==='hr')));return send(res,200,{user:publicUser(me),balance,requests:mine,approvals:pending,notifications:store.notifications.filter(n=>n.email===me.email).slice(0,12),nationalHolidays,festivalChoices:me.festivalChoices}); }
+  if (url.pathname==='/api/leave'&&req.method==='POST') { if(me.role!=='employee')return send(res,403,{error:'Only employees can request leave.'});const d=await body(req);if(!d.start||!d.end||d.start>d.end)return send(res,400,{error:'Choose a valid date range.'});let days=workingDays(d.start,d.end,me.festivalChoices);if(d.halfDay){if(days!==1)return send(res,400,{error:'Half-day leave must cover one working day.'});days=.5;}if(!days)return send(res,400,{error:'The selected dates contain no working days.'});const available=Math.max(0,me.earnedEntitlement+me.carryForward-approvedEarned(store,me.email));const earnedDays=Math.min(days,available),lwpDays=+(days-earnedDays).toFixed(1);const r={id:crypto.randomUUID(),employeeEmail:me.email,employeeName:me.name,managerEmail:me.managerEmail,start:d.start,end:d.end,days,earnedDays,lwpDays,reason:d.reason||'',halfDay:!!d.halfDay,status:'pending',managerDecision:'pending',hrDecision:'pending',createdAt:new Date().toISOString()};store.requests.unshift(r);notify(store,me.managerEmail,`${me.name} submitted a ${days}-day leave request.`);notify(store,'admin@pollenit.com',`${me.name} submitted a ${days}-day leave request for HR approval.`);writeStore(store);return send(res,201,{request:r}); }
+  const match=url.pathname.match(/^\/api\/leave\/([^/]+)\/(decision|cancel)$/);
+  if(match&&req.method==='POST'){const r=store.requests.find(x=>x.id===match[1]);if(!r)return send(res,404,{error:'Request not found.'});const d=await body(req);if(match[2]==='cancel'){if(r.employeeEmail!==me.email)return send(res,403,{error:'Not your request.'});if(r.start<=new Date().toISOString().slice(0,10))return send(res,400,{error:'Leave can only be cancelled before its start date.'});if(!['pending','approved'].includes(r.status))return send(res,400,{error:'This request cannot be cancelled.'});r.status='cancelled';notify(store,r.managerEmail,`${me.name} cancelled a leave request.`);notify(store,'admin@pollenit.com',`${me.name} cancelled a leave request.`);writeStore(store);return send(res,200,{request:r});}if(r.status!=='pending')return send(res,400,{error:'This request is already closed.'});const isManager=me.role==='manager'&&r.managerEmail===me.email,isHr=me.role==='hr';if(!isManager&&!isHr)return send(res,403,{error:'You are not an approver for this request.'});const decision=d.decision==='approved'?'approved':'rejected';if(isManager)r.managerDecision=decision;if(isHr)r.hrDecision=decision;r.status=(r.managerDecision==='rejected'||r.hrDecision==='rejected')?'rejected':(r.managerDecision==='approved'&&r.hrDecision==='approved'?'approved':'pending');if(r.status==='approved')notify(store,r.employeeEmail,'Your leave request has been approved by both Manager and HR.');else if(r.status==='rejected')notify(store,r.employeeEmail,'Your leave request was rejected.');else notify(store,r.employeeEmail,`${isManager?'Manager':'HR'} approved your request. Waiting for the other approval.`);writeStore(store);return send(res,200,{request:r});}
+  if(url.pathname==='/api/festival-choice'&&req.method==='POST'){const d=await body(req);if(!d.date||me.festivalChoices.includes(d.date)||me.festivalChoices.length>=5)return send(res,400,{error:'You can select up to five different festival holidays.'});me.festivalChoices.push(d.date);writeStore(store);return send(res,200,{festivalChoices:me.festivalChoices});}
+  const safePath=url.pathname==='/'?'/index.html':url.pathname;const file=path.join(root,safePath);if(!file.startsWith(root))return send(res,403,{error:'Forbidden'});fs.readFile(file,(err,data)=>{if(err){res.writeHead(404);return res.end('Not found');}res.writeHead(200,{'Content-Type':types[path.extname(file)]||'application/octet-stream'});res.end(data);});
+ } catch(e){console.error(e);send(res,500,{error:'An unexpected error occurred.'});}
+}).listen(process.env.PORT||3000,()=>console.log('PollenIT Leave Hub running at http://localhost:3000'));
