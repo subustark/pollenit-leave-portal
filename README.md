@@ -26,7 +26,7 @@ Then open `http://localhost:3000` in your browser.
 
 ## Demo controls
 
-Pilot accounts use the real PollenIT work-email addresses provided. The initial temporary password for each account is `Welcome@2026`:
+Pilot accounts use the real PollenIT work-email addresses provided. Initial temporary passwords are deliberately not stored in Git; provide them to each pilot user privately.
 
 - `subramani.e@pollenit.com` - employee
 - `lalit.choudhary@pollenit.com` - employee
