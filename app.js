@@ -1,4 +1,5 @@
 const $=s=>document.querySelector(s);let me=null, data=null;
+document.querySelectorAll('.mark').forEach(mark=>{mark.innerHTML='<img src="/assets/pollenit-logo.png" alt="PollenIT Technologies logo">'});
 const profile=p=>({...p,name:p.full_name,email:p.work_email,title:p.designation,earnedEntitlement:Number(p.earned_leave_entitlement),carryForward:Number(p.carry_forward)});
 new MutationObserver(()=>{if(me&&data)document.querySelector('.card p').textContent=`${(me.earnedEntitlement+me.carryForward-data.balance).toFixed(1)} days used this year`}).observe($('#elBalance'),{childList:true});
 $('.demoAccounts').innerHTML='<b>Pilot access</b><span>Use your PollenIT work email.</span><span>Use the temporary password sent to you privately.</span>';
