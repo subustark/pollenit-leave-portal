@@ -1,5 +1,8 @@
 const $=s=>document.querySelector(s);let me=null, data=null;
 document.querySelectorAll('.mark').forEach(mark=>{mark.innerHTML='<img src="/assets/pollenit-dots-transparent.png" alt="PollenIT Technologies logo">'});
+$('#pageTitle').textContent='Loading your leave hub…';
+$('#eyebrow').textContent='POLLENIT LEAVE HUB';
+$('#elBalance').textContent='—';
 const profile=p=>({...p,name:p.full_name,email:p.work_email,title:p.designation,earnedEntitlement:Number(p.earned_leave_entitlement),carryForward:Number(p.carry_forward)});
 function greeting(){const h=new Date().getHours();return h<12?'Good morning':h<17?'Good afternoon':h<21?'Good evening':'Good night'}
 new MutationObserver(()=>{if(me&&data)document.querySelector('.card p').textContent=`${(me.earnedEntitlement+me.carryForward-data.balance).toFixed(1)} days used this year`}).observe($('#elBalance'),{childList:true});
